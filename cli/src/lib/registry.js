@@ -161,16 +161,22 @@ export function listEntries(filters = {}) {
 
 /**
  * Resolve the doc path + source for an entry.
- * Returns { source, path } or null.
+ * Returns { source, path, provides, files } or null.
+ * If language is null and multiple languages exist, returns { needsLanguage: true, available: [...] }.
  */
 export function resolveDocPath(entry, language, version) {
-  const lang = normalizeLanguage(language);
+  const lang = language ? normalizeLanguage(language) : null;
 
   let langObj = null;
   if (lang) {
     langObj = entry.languages?.find((l) => l.language === lang);
   } else if (entry.languages?.length === 1) {
     langObj = entry.languages[0];
+  } else if (entry.languages?.length > 1) {
+    return {
+      needsLanguage: true,
+      available: entry.languages.map((l) => l.language),
+    };
   }
 
   if (!langObj) return null;
@@ -184,5 +190,32 @@ export function resolveDocPath(entry, language, version) {
   }
 
   if (!verObj?.path) return null;
-  return { source: entry._sourceObj, path: verObj.path };
+  return {
+    source: entry._sourceObj,
+    path: verObj.path,
+    provides: verObj.provides || [],
+    files: verObj.files || [],
+  };
+}
+
+/**
+ * Given a resolved path and a type ("doc" or "skill"), return the entry file path.
+ * Returns { filePath, basePath } or { error }.
+ */
+export function resolveEntryFile(resolved, type) {
+  if (!resolved || resolved.needsLanguage) return { error: 'unresolved' };
+
+  const fileName = type === 'skill' ? 'SKILL.md' : 'DOC.md';
+
+  if (resolved.provides.length > 0 && !resolved.provides.includes(type)) {
+    return {
+      error: `doesn't provide a ${type}. It has: ${resolved.provides.join(', ')}`,
+    };
+  }
+
+  return {
+    filePath: `${resolved.path}/${fileName}`,
+    basePath: resolved.path,
+    files: resolved.files,
+  };
 }

@@ -1,65 +1,133 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import chalk from 'chalk';
-import { getEntry, resolveDocPath } from '../lib/registry.js';
-import { fetchDoc } from '../lib/cache.js';
+import { getEntry, resolveDocPath, resolveEntryFile } from '../lib/registry.js';
+import { fetchDoc, fetchDocFull } from '../lib/cache.js';
 import { output, error, info } from '../lib/output.js';
 
+/**
+ * Core fetch logic shared by `get docs` and `get skills`.
+ * @param {string} type - "doc" or "skill"
+ * @param {string[]} ids - one or more entry ids
+ * @param {object} opts - command options (lang, version, output, full)
+ * @param {object} globalOpts - global options (json)
+ */
+async function fetchEntries(type, ids, opts, globalOpts) {
+  const results = [];
+
+  for (const id of ids) {
+    const result = getEntry(id);
+
+    if (result.ambiguous) {
+      error(
+        `Multiple entries with id "${id}". Be specific:\n  ${result.alternatives.join('\n  ')}`,
+        globalOpts
+      );
+    }
+
+    if (!result.entry) {
+      error(`Entry "${id}" not found.`, globalOpts);
+    }
+
+    const entry = result.entry;
+    const resolved = resolveDocPath(entry, opts.lang, opts.version);
+
+    if (!resolved) {
+      error(`Could not resolve path for "${id}" ${opts.lang || ''} ${opts.version || ''}`.trim(), globalOpts);
+    }
+
+    if (resolved.needsLanguage) {
+      error(
+        `Multiple languages available for "${id}": ${resolved.available.join(', ')}. Specify --lang.`,
+        globalOpts
+      );
+    }
+
+    const entryFile = resolveEntryFile(resolved, type);
+    if (entryFile.error) {
+      error(`"${id}" ${entryFile.error}`, globalOpts);
+    }
+
+    try {
+      if (opts.full && resolved.files.length > 0) {
+        const allFiles = await fetchDocFull(resolved.source, resolved.path, resolved.files);
+        const combined = allFiles
+          .map((f) => `# FILE: ${f.name}\n\n${f.content}`)
+          .join('\n\n---\n\n');
+        results.push({ id: entry.id, content: combined, path: resolved.path, files: resolved.files });
+      } else {
+        const content = await fetchDoc(resolved.source, entryFile.filePath);
+        results.push({ id: entry.id, content, path: entryFile.filePath });
+      }
+    } catch (err) {
+      error(err.message, globalOpts);
+    }
+  }
+
+  // Output
+  if (opts.output) {
+    const isDir = opts.output.endsWith('/');
+    if (isDir && results.length > 1) {
+      mkdirSync(opts.output, { recursive: true });
+      for (const r of results) {
+        const outPath = join(opts.output, `${r.id}.md`);
+        writeFileSync(outPath, r.content);
+        info(`Written to ${outPath}`);
+      }
+    } else {
+      const outPath = isDir ? join(opts.output, `${results[0].id}.md`) : opts.output;
+      mkdirSync(dirname(outPath), { recursive: true });
+      const combined = results.map((r) => r.content).join('\n\n---\n\n');
+      writeFileSync(outPath, combined);
+      info(`Written to ${outPath}`);
+    }
+    if (globalOpts.json) {
+      console.log(JSON.stringify(results.map((r) => ({ id: r.id, path: opts.output, size: r.content.length }))));
+    }
+  } else {
+    if (results.length === 1) {
+      output(
+        { id: results[0].id, content: results[0].content, path: results[0].path },
+        (data) => process.stdout.write(data.content),
+        globalOpts
+      );
+    } else {
+      const combined = results.map((r) => r.content).join('\n\n---\n\n');
+      output(
+        results.map((r) => ({ id: r.id, content: r.content, path: r.path })),
+        () => process.stdout.write(combined),
+        globalOpts
+      );
+    }
+  }
+}
+
 export function registerGetCommand(program) {
-  program
-    .command('get <id> [language]')
-    .description('Retrieve a doc or skill')
+  const get = program
+    .command('get')
+    .description('Retrieve docs or skills');
+
+  get
+    .command('docs <ids...>')
+    .description('Fetch documentation content')
+    .option('--lang <language>', 'Language variant')
     .option('--version <version>', 'Specific version')
-    .option('-o, --output <path>', 'Write to file instead of stdout')
-    .action(async (id, language, opts) => {
+    .option('-o, --output <path>', 'Write to file or directory')
+    .option('--full', 'Fetch all files (not just entry point)')
+    .action(async (ids, opts) => {
       const globalOpts = program.optsWithGlobals();
-      const result = getEntry(id);
+      await fetchEntries('doc', ids, opts, globalOpts);
+    });
 
-      if (result.ambiguous) {
-        error(
-          `Multiple entries with id "${id}". Be specific:\n  ${result.alternatives.join('\n  ')}`,
-          globalOpts
-        );
-      }
-
-      if (!result.entry) {
-        error(`Entry "${id}" not found.`, globalOpts);
-      }
-
-      const entry = result.entry;
-
-      // If no language specified and multiple available, show options
-      if (!language && entry.languages?.length > 1) {
-        error(
-          `Multiple languages available: ${entry.languages.map((l) => l.language).join(', ')}. Specify one.`,
-          globalOpts
-        );
-      }
-
-      const resolved = resolveDocPath(entry, language, opts.version);
-      if (!resolved) {
-        error(`Could not resolve path for ${id} ${language || ''} ${opts.version || ''}`, globalOpts);
-      }
-
-      try {
-        const content = await fetchDoc(resolved.source, resolved.path);
-
-        if (opts.output) {
-          mkdirSync(dirname(opts.output), { recursive: true });
-          writeFileSync(opts.output, content);
-          info(`Written to ${opts.output}`);
-          if (globalOpts.json) {
-            console.log(JSON.stringify({ id: entry.id, path: opts.output, size: content.length }));
-          }
-        } else {
-          output(
-            { id: entry.id, content, path: resolved.path },
-            (data) => process.stdout.write(data.content),
-            globalOpts
-          );
-        }
-      } catch (err) {
-        error(err.message, globalOpts);
-      }
+  get
+    .command('skills <ids...>')
+    .description('Fetch skill content')
+    .option('--lang <language>', 'Language variant')
+    .option('--version <version>', 'Specific version')
+    .option('-o, --output <path>', 'Write to file or directory')
+    .option('--full', 'Fetch all files (not just entry point)')
+    .action(async (ids, opts) => {
+      const globalOpts = program.optsWithGlobals();
+      await fetchEntries('skill', ids, opts, globalOpts);
     });
 }

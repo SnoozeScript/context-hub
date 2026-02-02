@@ -157,6 +157,20 @@ export async function fetchDoc(source, docPath) {
 }
 
 /**
+ * Fetch all files in an entry directory.
+ * Returns array of { name, content }.
+ */
+export async function fetchDocFull(source, basePath, files) {
+  const results = [];
+  for (const file of files) {
+    const filePath = `${basePath}/${file}`;
+    const content = await fetchDoc(source, filePath);
+    results.push({ name: file, content });
+  }
+  return results;
+}
+
+/**
  * Load cached/local registry for a single source.
  */
 export function loadSourceRegistry(source) {

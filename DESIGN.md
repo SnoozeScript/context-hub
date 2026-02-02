@@ -29,11 +29,11 @@ The CLI supports **multiple sources** — both remote CDNs and local folders. En
 
 ## Design Decisions & Rationale
 
-### Why only 4 commands?
-We started with 8 commands (search, list, info, get, pull, update, cache, languages) and trimmed to 4. `list` and `info` were merged into `search` (no query = list all, exact id = show detail). `languages` was dropped (search output already shows languages). `pull` (search+get+write) was dropped in favor of unix piping — agents can compose `search --json | jq` with `get -o` for the same result with more control.
+### Why `get docs` / `get skills`?
+Docs ("what to know") and skills ("how to do it") have fundamentally different access patterns. Docs are large reference material fetched on-demand for a specific task. Skills are behavioral instructions that can be installed into agent skill directories. Separate subcommands make intent explicit and allow different behavior (e.g., skills may be installed to `.claude/skills/` in the future).
 
-### Why no `type` field?
-We considered a `type: "docs" | "skills"` field but dropped it. Content can be both a doc and a skill — some API references include step-by-step patterns. Instead, `docs` and `skill` are just tags. Filter with `--tags docs` or `--tags skill`.
+### Why 5 commands?
+We started with 8 commands (search, list, info, get, pull, update, cache, languages) and trimmed to 5. `list` and `info` were merged into `search` (no query = list all, exact id = show detail). `languages` was dropped (search output already shows languages). `pull` (search+get+write) was dropped in favor of unix piping. `get` was split into `get docs` and `get skills` for explicit intent.
 
 ### Why `source` field + config-level filtering?
 Each entry has `source: "official" | "maintainer" | "community"`. Rather than exposing a `--source` flag to agents, the human controls trust policy via `~/.chub/config.yaml`. This means an enterprise can restrict agents to `source: official,maintainer` without the agent needing to know about quality tiers. Long-term, source filtering will be supplemented by agent usage/complaint reporting data.
@@ -79,7 +79,8 @@ Most IDs are unique across sources, so forcing `source/id` everywhere would add 
 | Command | Purpose | Key Options |
 |---|---|---|
 | `chub search [query]` | Search (no query = list all, exact id = detail) | `--tags`, `--lang`, `--limit`, `--json` |
-| `chub get <id> [language]` | Fetch a specific doc/skill | `--version`, `-o <path>`, `--json` |
+| `chub get docs <ids...>` | Fetch documentation content | `--lang`, `--version`, `--full`, `-o <path>`, `--json` |
+| `chub get skills <ids...>` | Fetch skill content | `--lang`, `--version`, `--full`, `-o <path>`, `--json` |
 | `chub update` | Refresh cached registry | `--force`, `--full` |
 | `chub cache status\|clear` | Manage local cache | |
 
@@ -89,10 +90,19 @@ Most IDs are unique across sources, so forcing `source/id` everywhere would add 
 - `chub search "stripe"` — fuzzy search across id, name, description, tags
 - `chub search --tags skill,browser` — filtered listing
 
+### How `get` works
+- `chub get docs openai-chat` — fetch DOC.md (entry point only)
+- `chub get docs openai-chat --full` — fetch all files in the entry (DOC.md + references)
+- `chub get docs openai-chat --lang python` — specify language when multiple available
+- `chub get docs openai-chat stripe-payments` — fetch multiple entries at once
+- `chub get skills playwright-login` — fetch SKILL.md from a skill entry
+- Error if entry doesn't provide the requested type: `"openai-chat" doesn't provide a skill. It has: doc`
+
 ### Output modes
 - **Default**: Human-friendly, colored terminal output
 - **`--json`**: Structured JSON to stdout (no color escapes)
 - **`-o <path>`**: Write content to file, print short confirmation to stderr
+- **`-o <dir>/`**: Write each entry as separate file when fetching multiple
 
 ### Agent piping patterns
 Instead of a dedicated `pull` command, agents compose standard unix tools:
@@ -101,45 +111,88 @@ Instead of a dedicated `pull` command, agents compose standard unix tools:
 # Get the top search result's id
 chub search "stripe payments" --json | jq -r '.results[0].id'
 
-# Get top 3 ids
-chub search "stripe payments" --json | jq -r '.results[:3][].id'
-
 # Full pipeline: search → pick best → fetch → write to file
 ID=$(chub search "stripe payments" --json | jq -r '.results[0].id')
-chub get "$ID" js -o .context/stripe.md
+chub get docs "$ID" --lang js -o .context/stripe.md
 
-# Fetch multiple results
-for ID in $(chub search "authentication" --json | jq -r '.results[:3][].id'); do
-  chub get "$ID" -o ".context/${ID}.md"
-done
+# Fetch multiple docs at once
+chub get docs openai-chat stripe-payments -o .context/
 ```
 
 ### Human workflow example
 ```bash
-chub search "authentication"          # Browse what's available
-chub search jwt-auth-pattern          # Exact id → full detail
-chub get jwt-auth-pattern typescript  # Read in terminal
-chub get jwt-auth-pattern ts -o .context/jwt.md  # Save to file
+chub search "authentication"                   # Browse what's available
+chub search jwt-auth-pattern                   # Exact id → full detail
+chub get skills jwt-auth-pattern               # Read skill in terminal
+chub get skills jwt-auth-pattern -o .context/  # Save to file
+chub get docs openai-chat --lang py            # Read doc for Python
 ```
 
 ---
 
 ## Data Strategy
 
+### Content format: Agent Skills compatible
+
+All content follows the [Agent Skills spec](https://agentskills.io/specification). Each entry is a **directory** containing `DOC.md` and/or `SKILL.md` plus supporting files:
+
+```
+# Doc-only entry
+openai-chat/python/1.52.0/
+├── DOC.md                    # Entry point with frontmatter
+├── references/
+│   ├── completions.md        # Detailed API reference
+│   └── streaming.md
+└── examples/
+    └── basic-usage.md
+
+# Skill-only entry
+playwright-login/typescript/1.0.0/
+├── SKILL.md                  # Skill instructions with frontmatter
+├── scripts/
+│   └── login-helper.ts
+└── references/
+    └── selectors.md
+
+# Bundled entry (both)
+stripe-payments/python/2.0.0/
+├── DOC.md                    # API reference
+├── SKILL.md                  # Integration guide (may reference DOC.md via chub)
+└── references/...
+```
+
+Both DOC.md and SKILL.md use the Agent Skills frontmatter format:
+```yaml
+---
+name: openai-chat
+description: OpenAI Chat API - completions, streaming, function calling
+metadata:
+  language: python
+  version: "1.52.0"
+  source: maintainer
+  tags: "docs,openai,chat"
+---
+```
+
+**Progressive disclosure**: `chub get docs <id>` returns only the entry point (DOC.md). `--full` returns all files. Agents read the entry point first, then selectively load referenced files.
+
 ### What the CDN serves
 ```
 cdn.contexthub.dev/v1/
-├── registry.json                                    # ~100KB index
-├── bundle.tar.gz                                    # Full bundle (optional)
-├── docs/openai/chat/python/1.52.0/CONTEXT.md       # Individual files
-└── skills/browser/playwright-login/.../CONTEXT.md   # Individual files
+├── registry.json                                         # ~100KB index
+├── bundle.tar.gz                                         # Full bundle (optional)
+├── libraries/openai/chat/python/1.52.0/DOC.md           # Entry point
+├── libraries/openai/chat/python/1.52.0/references/...   # Supporting files
+└── skills/browser/playwright-login/.../SKILL.md         # Skill entry point
 ```
 
 ### How the CLI uses it
 1. `chub update` → fetches `registry.json` only (~100KB), caches locally
 2. `chub search` → searches local registry (no network)
-3. `chub get <id>` → checks local cache first, fetches individual file from CDN if missing
-4. `chub update --full` → downloads entire `bundle.tar.gz` for offline use
+3. `chub get docs <id>` → fetches DOC.md (entry point), checks cache first
+4. `chub get docs <id> --full` → fetches all files listed in registry
+5. `chub get skills <id>` → fetches SKILL.md
+6. `chub update --full` → downloads entire `bundle.tar.gz` for offline use
 
 ### Local cache layout
 ```
@@ -150,7 +203,7 @@ cdn.contexthub.dev/v1/
     │   ├── registry.json    # Cached index for this source
     │   ├── meta.json        # { lastUpdated, registryHash }
     │   └── data/            # Cached content (on-demand or full bundle)
-    │       └── docs/openai/chat/python/1.52.0/CONTEXT.md
+    │       └── libraries/openai/chat/python/1.52.0/DOC.md
     └── another-remote/
         ├── registry.json
         ├── meta.json
@@ -182,8 +235,13 @@ Local path sources are **not cached** — the CLI reads directly from the config
           "versions": [
             {
               "version": "1.52.0",
-              "path": "docs/openai/chat/python/1.52.0/CONTEXT.md",
-              "hash": "sha256:abc123...",
+              "path": "libraries/openai/chat/python/1.52.0",
+              "provides": ["doc"],
+              "files": [
+                "DOC.md",
+                "references/completions.md",
+                "references/streaming.md"
+              ],
               "size": 45200,
               "lastUpdated": "2026-01-15"
             }
@@ -198,9 +256,10 @@ Local path sources are **not cached** — the CLI reads directly from the config
 
 **Field notes:**
 - `source` — `official` (library author), `maintainer` (context-hub team), `community`. Filtered by config, not by agent.
-- `path` — relative to `base_url`, used for on-demand fetching
-- `hash` — content hash, skip re-download if local cache matches
-- `size` — bytes, useful for progress indication and token estimation
+- `path` — relative to `base_url`, points to the entry **directory** (not a single file)
+- `provides` — array of `"doc"` and/or `"skill"`, derived from which files exist (DOC.md → doc, SKILL.md → skill)
+- `files` — list of all files in the entry directory, used by `--full` and future install
+- `size` — total bytes across all files, useful for progress indication and token estimation
 - `tags` — used for all filtering (vendor, category, content type like `docs`/`skill`)
 
 ### Config (`~/.chub/config.yaml`)
@@ -261,7 +320,22 @@ chub-first-draft/
 - `tar` ^7 — Bundle extraction (for `--full` mode)
 - Node.js >= 18 (built-in `fetch`, no `node-fetch` needed)
 
+## Agent Skills Compatibility
+
+Content follows the [Agent Skills open standard](https://agentskills.io/specification), supported by Claude Code, Cursor, Codex, OpenCode, and 30+ agents. Both DOC.md and SKILL.md use the standard's frontmatter format (`name`, `description`, optional `metadata`).
+
+**Why adopt the standard?** Makes chub content interoperable with the broader agent ecosystem. A skill fetched via chub can be installed into any agent's skill directory and discovered natively.
+
+**How chub extends it:** The Agent Skills spec covers file format and directory structure but has no distribution, versioning, or discovery story. chub adds:
+- Versioned entries with language variants
+- Registry-based search and discovery over network
+- Multi-source aggregation (CDN + local folders)
+- Trust/quality filtering via `source` field
+
+**Docs vs Skills:** Both use the same frontmatter format, but `chub get docs` fetches DOC.md and `chub get skills` fetches SKILL.md. Docs are reference knowledge; skills are behavioral instructions. An entry directory can provide both.
+
 ## Reference
 
 - Existing implementation (for patterns, not to copy): see `rp15-chub/context-hub/cli/`
 - Existing content (193+ API docs): see `rp15-chub/context-hub/libraries/`
+- Agent Skills specification: https://agentskills.io/specification

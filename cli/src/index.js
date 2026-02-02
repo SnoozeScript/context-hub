@@ -19,26 +19,31 @@ Search and retrieve LLM-optimized docs and skills.
 
 ${chalk.bold.underline('Getting Started')}
 
-  ${chalk.dim('$')} chub update                          ${chalk.dim('# download the registry')}
-  ${chalk.dim('$')} chub search                          ${chalk.dim('# list everything available')}
-  ${chalk.dim('$')} chub search "stripe"                 ${chalk.dim('# fuzzy search')}
-  ${chalk.dim('$')} chub search stripe-payments          ${chalk.dim('# exact id → full detail')}
-  ${chalk.dim('$')} chub get stripe-payments js           ${chalk.dim('# print doc to terminal')}
-  ${chalk.dim('$')} chub get stripe-payments js -o doc.md ${chalk.dim('# save to file')}
+  ${chalk.dim('$')} chub update                                ${chalk.dim('# download the registry')}
+  ${chalk.dim('$')} chub search                                ${chalk.dim('# list everything available')}
+  ${chalk.dim('$')} chub search "stripe"                       ${chalk.dim('# fuzzy search')}
+  ${chalk.dim('$')} chub search stripe-payments                ${chalk.dim('# exact id → full detail')}
+  ${chalk.dim('$')} chub get docs stripe-payments              ${chalk.dim('# print doc to terminal')}
+  ${chalk.dim('$')} chub get docs stripe-payments -o doc.md    ${chalk.dim('# save to file')}
+  ${chalk.dim('$')} chub get docs stripe-payments --lang py    ${chalk.dim('# specific language')}
+  ${chalk.dim('$')} chub get skills playwright-login           ${chalk.dim('# fetch a skill')}
+  ${chalk.dim('$')} chub get docs openai-chat stripe-payments  ${chalk.dim('# fetch multiple')}
 
 ${chalk.bold.underline('Commands')}
 
-  ${chalk.bold('search')} [query]        Search docs and skills (no query = list all)
-  ${chalk.bold('get')} <id> [language]    Fetch a doc or skill content
-  ${chalk.bold('update')}                 Refresh the cached registry
-  ${chalk.bold('cache')} status|clear     Manage the local cache
+  ${chalk.bold('search')} [query]              Search docs and skills (no query = list all)
+  ${chalk.bold('get docs')} <ids...>           Fetch documentation content
+  ${chalk.bold('get skills')} <ids...>         Fetch skill content
+  ${chalk.bold('update')}                      Refresh the cached registry
+  ${chalk.bold('cache')} status|clear          Manage the local cache
 
 ${chalk.bold.underline('Flags')}
 
   --json                 Structured JSON output (for agents and piping)
   --tags <csv>           Filter by tags (e.g. docs, skill, openai, browser)
-  --lang <language>      Filter by language (js, py, ts)
-  -o, --output <path>    Write content to file
+  --lang <language>      Language variant (js, py, ts)
+  --full                 Fetch all files, not just the entry point
+  -o, --output <path>    Write content to file or directory
 
 ${chalk.bold.underline('Agent Piping Patterns')}
 
@@ -47,12 +52,10 @@ ${chalk.bold.underline('Agent Piping Patterns')}
 
   ${chalk.dim('# Search → pick → fetch → save')}
   ${chalk.dim('$')} ID=$(chub search "stripe" --json | jq -r '.results[0].id')
-  ${chalk.dim('$')} chub get "$ID" js -o .context/stripe.md
+  ${chalk.dim('$')} chub get docs "$ID" --lang js -o .context/stripe.md
 
-  ${chalk.dim('# Fetch top 3 results')}
-  ${chalk.dim('$')} for ID in $(chub search "auth" --json | jq -r '.results[:3][].id'); do
-      chub get "$ID" -o ".context/\${ID}.md"
-    done
+  ${chalk.dim('# Fetch multiple docs at once')}
+  ${chalk.dim('$')} chub get docs openai-chat stripe-payments -o .context/
 
 ${chalk.bold.underline('Multi-Source Config')} ${chalk.dim('(~/.chub/config.yaml)')}
 
@@ -62,7 +65,7 @@ ${chalk.bold.underline('Multi-Source Config')} ${chalk.dim('(~/.chub/config.yaml
   ${chalk.dim('  - name: internal')}
   ${chalk.dim('    path: /path/to/local/docs')}
 
-  ${chalk.dim('# On id collision, use namespace: chub get internal/my-api')}
+  ${chalk.dim('# On id collision, use namespace: chub get docs internal/my-api')}
 `);
 }
 

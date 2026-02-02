@@ -15,7 +15,9 @@
           "versions": [
             {
               "version": "6.7.0",
-              "path": "libraries/openai/chat/javascript/6.7.0/CONTEXT.md",
+              "path": "libraries/openai/chat/javascript/6.7.0",
+              "provides": ["doc"],
+              "files": ["DOC.md"],
               "size": 45200,
               "lastUpdated": "2025-11-12"
             }
@@ -27,7 +29,9 @@
           "versions": [
             {
               "version": "1.52.0",
-              "path": "libraries/openai/chat/python/1.52.0/CONTEXT.md",
+              "path": "libraries/openai/chat/python/1.52.0",
+              "provides": ["doc"],
+              "files": ["DOC.md"],
               "size": 42000,
               "lastUpdated": "2025-11-12"
             }
@@ -48,7 +52,9 @@
           "versions": [
             {
               "version": "14.0.0",
-              "path": "libraries/stripe/payments/javascript/14.0.0/CONTEXT.md",
+              "path": "libraries/stripe/payments/javascript/14.0.0",
+              "provides": ["doc"],
+              "files": ["DOC.md"],
               "size": 38000,
               "lastUpdated": "2025-11-12"
             }
@@ -69,7 +75,9 @@
           "versions": [
             {
               "version": "1.0.0",
-              "path": "skills/browser/playwright-login-flows/typescript/1.0.0/CONTEXT.md",
+              "path": "skills/browser/playwright-login-flows/typescript/1.0.0",
+              "provides": ["skill"],
+              "files": ["SKILL.md"],
               "size": 12000,
               "lastUpdated": "2026-01-15"
             }
