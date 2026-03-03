@@ -47,13 +47,32 @@ async function fetchEntries(ids, opts, globalOpts) {
       error(`"${id}" ${entryFile.error}`, globalOpts);
     }
 
+    // Determine which reference files exist (beyond DOC.md/SKILL.md)
+    const entryFileName = type === 'skill' ? 'SKILL.md' : 'DOC.md';
+    const refFiles = resolved.files.filter((f) => f !== entryFileName);
+
     try {
-      if (opts.full && resolved.files.length > 0) {
+      if (opts.file) {
+        // --file mode: fetch specific file(s) by path
+        const requested = opts.file.split(',').map((f) => f.trim());
+        const invalid = requested.filter((f) => !resolved.files.includes(f));
+        if (invalid.length > 0) {
+          const available = refFiles.length > 0 ? refFiles.join(', ') : '(none)';
+          error(`File "${invalid[0]}" not found in ${id}. Available: ${available}`, globalOpts);
+        }
+        if (requested.length === 1) {
+          const content = await fetchDoc(resolved.source, join(resolved.path, requested[0]));
+          results.push({ id: entry.id, type, content, path: join(resolved.path, requested[0]) });
+        } else {
+          const allFiles = await fetchDocFull(resolved.source, resolved.path, requested);
+          results.push({ id: entry.id, type, files: allFiles, path: resolved.path });
+        }
+      } else if (opts.full && resolved.files.length > 0) {
         const allFiles = await fetchDocFull(resolved.source, resolved.path, resolved.files);
         results.push({ id: entry.id, type, files: allFiles, path: resolved.path });
       } else {
         const content = await fetchDoc(resolved.source, entryFile.filePath);
-        results.push({ id: entry.id, type, content, path: entryFile.filePath });
+        results.push({ id: entry.id, type, content, path: entryFile.filePath, additionalFiles: refFiles });
       }
     } catch (err) {
       error(err.message, globalOpts);
@@ -112,9 +131,20 @@ async function fetchEntries(ids, opts, globalOpts) {
     }
   } else {
     if (results.length === 1 && !results[0].files) {
+      const r = results[0];
+      const extraFiles = r.additionalFiles || [];
+      const jsonData = { id: r.id, type: r.type, content: r.content, path: r.path };
+      if (extraFiles.length > 0) jsonData.additionalFiles = extraFiles;
       output(
-        { id: results[0].id, type: results[0].type, content: results[0].content, path: results[0].path },
-        (data) => process.stdout.write(data.content),
+        jsonData,
+        (data) => {
+          process.stdout.write(data.content);
+          if (extraFiles.length > 0) {
+            const fileList = extraFiles.map((f) => `  ${f}`).join('\n');
+            const example = `chub get ${r.id} --file ${extraFiles[0]}`;
+            process.stdout.write(`\n\n---\nAdditional files available (use --file to fetch):\n${fileList}\nExample: ${example}\n`);
+          }
+        },
         globalOpts
       );
     } else {
@@ -142,6 +172,7 @@ export function registerGetCommand(program) {
     .option('--version <version>', 'Specific version (for docs)')
     .option('-o, --output <path>', 'Write to file or directory')
     .option('--full', 'Fetch all files (not just entry point)')
+    .option('--file <paths>', 'Fetch specific file(s) by path (comma-separated)')
     .action(async (ids, opts) => {
       const globalOpts = program.optsWithGlobals();
       await fetchEntries(ids, opts, globalOpts);

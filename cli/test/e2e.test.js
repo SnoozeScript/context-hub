@@ -165,6 +165,40 @@ describe('chub CLI e2e', () => {
       expect(out).toContain('# Deploy Skill');
       expect(out).toContain('Automate deployments');
     });
+
+    it('shows footer with additional files when they exist', () => {
+      const out = chub(['get', 'acme/widgets']);
+      expect(out).toContain('Additional files available');
+      expect(out).toContain('references/advanced.md');
+      expect(out).toContain('--file');
+    });
+
+    it('no footer when entry has only one file', () => {
+      const out = chub(['get', 'multilang/client', '--lang', 'js']);
+      expect(out).not.toContain('Additional files available');
+    });
+
+    it('fetches specific file with --file', () => {
+      const out = chub(['get', 'acme/widgets', '--file', 'references/advanced.md']);
+      expect(out).toContain('Batch Operations');
+      expect(out).not.toContain('# Acme Widgets API');
+    });
+
+    it('errors on nonexistent --file with available list', () => {
+      const out = chub(['get', 'acme/widgets', '--file', 'nonexistent.md'], { expectError: true });
+      expect(out).toContain('not found in acme/widgets');
+      expect(out).toContain('references/advanced.md');
+    });
+
+    it('--json includes additionalFiles array', () => {
+      const data = chubJSON(['get', 'acme/widgets']);
+      expect(data.additionalFiles).toContain('references/advanced.md');
+    });
+
+    it('--json omits additionalFiles when none exist', () => {
+      const data = chubJSON(['get', 'multilang/client', '--lang', 'js']);
+      expect(data.additionalFiles).toBeUndefined();
+    });
   });
 
   describe('json output', () => {
